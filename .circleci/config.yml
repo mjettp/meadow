@@ -3,6 +3,7 @@ version: 2.1
 orbs:
   aws-cli: circleci/aws-cli@0.1
   docker-cache: nulib/docker-cache@0.3
+  status_to_ms_teams: bluemarblepayroll/status_to_ms_teams_pure_bash@1.0.1
 jobs:
   test:
     working_directory: ~/meadow
@@ -62,6 +63,8 @@ jobs:
       - store_artifacts:
           path: /tmp/test-results
           destination: tests
+      - status_to_ms_teams/report:
+          webhook_url: $MS_TEAMS_WEBHOOK_URL
   deploy:
     docker:
       - image: circleci/python:3.7.1
