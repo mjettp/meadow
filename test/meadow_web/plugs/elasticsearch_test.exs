@@ -30,11 +30,51 @@ defmodule ElasticsearchTest do
     test "returns results for _msearch reqeusts" do
       %{works: [work | _]} = indexable_data()
 
-      mquery =
-        "{\"preference\":\"SearchSensor\"}\n
-{\"query\":{\"bool\":{\"must\":[{\"bool\":{\"must\":{\"bool\":{\"should\":[{\"multi_match\":{\"query\":\"p\",\"fields\":[\"title\"],\"type\":\"best_fields\",\"operator\":\"or\",\"fuzziness\":0}},{\"multi_match\":{\"query\":\"#{
-          work.descriptive_metadata.title
-        }\",\"fields\":[\"title\"],\"type\":\"phrase_prefix\",\"operator\":\"or\"}}],\"minimum_should_match\":\"1\"}}}}]}},\"size\":10}"
+      synchronize()
+
+      mquery = """
+      {
+        "query": {
+          "bool": {
+            "must": [
+              {
+                "bool": {
+                  "must": {
+                    "bool": {
+                      "should": [
+                        {
+                          "multi_match": {
+                            "query": "p",
+                            "fields": [
+                              "title"
+                            ],
+                            "type": "best_fields",
+                            "operator": "or",
+                            "fuzziness": 0
+                          }
+                        },
+                        {
+                          "multi_match": {
+                            "query": "#{work.descriptive_metadata.title}",
+                            "fields": [
+                              "title"
+                            ],
+                            "type": "phrase_prefix",
+                            "operator": "or"
+                          }
+                        }
+                      ],
+                      "minimum_should_match": "1"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "size": 10
+      }
+      """
 
       conn =
         build_conn()
@@ -47,6 +87,8 @@ defmodule ElasticsearchTest do
 
     test "returns results for query string requests" do
       %{works: [work | _]} = indexable_data()
+
+      synchronize()
 
       conn =
         build_conn()

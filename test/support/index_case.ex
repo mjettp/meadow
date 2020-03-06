@@ -4,6 +4,7 @@ defmodule Meadow.IndexCase do
   """
   use ExUnit.CaseTemplate
   alias Ecto.Adapters.SQL.Sandbox
+  alias Meadow.Data.Indexer
   alias Meadow.Data.Schemas.{Collection, FileSet, IndexTime, Work}
   alias Meadow.ElasticsearchCluster, as: Cluster
   alias Meadow.Ingest.Schemas.{Project, Sheet}
@@ -42,13 +43,17 @@ defmodule Meadow.IndexCase do
         data |> String.split(~r/\n/) |> Enum.map(&Jason.decode!/1)
       end
 
+      def synchronize do
+        Indexer.synchronize_index()
+      end
+
       def indexable_data do
         collection = collection_fixture()
 
         works =
           1..5
           |> Enum.map(fn i ->
-            work_fixture(%{
+            work_with_file_sets_fixture(2, %{
               descriptive_metadata: %{title: "Test Work #{i}"},
               collection_id: collection.id,
               visibility: "restricted",
@@ -58,9 +63,8 @@ defmodule Meadow.IndexCase do
 
         file_sets =
           works
-          |> Enum.reduce([], fn work, acc ->
-            acc ++ Enum.map(1..2, fn _ -> file_set_fixture(%{work_id: work.id}) end)
-          end)
+          |> Repo.preload(:file_sets)
+          |> Enum.flat_map(& &1.file_sets)
 
         %{
           count: length(works) + length(file_sets) + 1,
