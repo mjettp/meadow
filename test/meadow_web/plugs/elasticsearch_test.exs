@@ -2,10 +2,17 @@ defmodule ElasticsearchTest do
   use MeadowWeb.ConnCase, async: false
   use Meadow.IndexCase
 
-  describe "MeadowWeb.Plugs.Elasticsearch" do
-    test "only accepts methods: [POST, GET, OPTIONS, HEAD]" do
-      %{works: [work | _]} = indexable_data()
+  alias Meadow.Data.Works
 
+  describe "MeadowWeb.Plugs.Elasticsearch" do
+    setup do
+      %{works: [work | _]} = indexable_data()
+      {:ok, work} = Works.update_work(work, %{descriptive_metadata: %{title: "Test Fixture"}})
+      synchronize()
+      {:ok, %{work: work}}
+    end
+
+    test "only accepts methods: [POST, GET, OPTIONS, HEAD]", %{work: work} do
       conn =
         build_conn()
         |> auth_user(user_fixture())
@@ -28,75 +35,31 @@ defmodule ElasticsearchTest do
     end
 
     test "returns results for _msearch reqeusts" do
-      %{works: [work | _]} = indexable_data()
-
-      synchronize()
-
       mquery = """
-      {
-        "query": {
-          "bool": {
-            "must": [
-              {
-                "bool": {
-                  "must": {
-                    "bool": {
-                      "should": [
-                        {
-                          "multi_match": {
-                            "query": "p",
-                            "fields": [
-                              "title"
-                            ],
-                            "type": "best_fields",
-                            "operator": "or",
-                            "fuzziness": 0
-                          }
-                        },
-                        {
-                          "multi_match": {
-                            "query": "#{work.descriptive_metadata.title}",
-                            "fields": [
-                              "title"
-                            ],
-                            "type": "phrase_prefix",
-                            "operator": "or"
-                          }
-                        }
-                      ],
-                      "minimum_should_match": "1"
-                    }
-                  }
-                }
-              }
-            ]
-          }
-        },
-        "size": 10
-      }
+      { }
+      {"query":{"match":{"title":"Test Fixture"}}}
       """
 
       conn =
         build_conn()
         |> auth_user(user_fixture())
         |> put_req_header("content-type", "application/x-ndjson")
-        |> post("/elasticsearch/meadow/_search", mquery)
+        |> post("/elasticsearch/meadow/_msearch", mquery)
 
-      assert Jason.decode!(conn.resp_body)["hits"]["total"] > 1
+      assert Jason.decode!(conn.resp_body)
+        |> Map.get("responses")
+        |> List.first()
+        |> get_in(["hits", "total"]) == 1
     end
 
     test "returns results for query string requests" do
-      %{works: [work | _]} = indexable_data()
-
-      synchronize()
-
       conn =
         build_conn()
         |> auth_user(user_fixture())
         |> put_req_header("content-type", "application/json")
-        |> get("/elasticsearch/meadow/_search?q=#{work.descriptive_metadata.title}")
+        |> get("/elasticsearch/meadow/_search?q=Test%20Fixture")
 
-      assert Jason.decode!(conn.resp_body)["hits"]["total"] > 0
+      assert Jason.decode!(conn.resp_body) |> get_in(["hits", "total"]) == 1
     end
   end
 end
