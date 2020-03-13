@@ -27,6 +27,7 @@ jobs:
           MINIO_ACCESS_KEY: minio
           MINIO_SECRET_KEY: minio123
         command: server /data
+    resource_class: medium+
     steps:
       - run:
           name: Install LDAP utils
