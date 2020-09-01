@@ -23,6 +23,8 @@ defmodule Mix.Tasks.Meadow.DcDownload do
   alias NimbleCSV.RFC4180, as: CSV
   require Logger
 
+  import HTTPoison.Retry
+
   @dcapi_url "https://dcapi.stack.rdc.library.northwestern.edu/search"
   @iiif_url "https://iiif.stack.rdc.library.northwestern.edu/iiif/2"
 
@@ -42,13 +44,26 @@ defmodule Mix.Tasks.Meadow.DcDownload do
         |> Enum.with_index(1)
         |> Enum.map(fn {{{fsid, filename}, row}, index} ->
           filename = Path.join(export_name, filename)
+          count = length(data)
 
-          Logger.info("Downloading image #{index}/#{length(data)}...")
+          unless File.exists?(filename) do
+            request =
+              HTTPoison.get("#{@iiif_url}/#{fsid}/full/!2048,2048/0/default.jpg")
+              |> autoretry(
+                max_attempts: 3,
+                wait: 1_000,
+                include_404s: false,
+                retry_unknown_errors: true
+              )
 
-          case HTTPoison.get!("#{@iiif_url}/#{fsid}/full/!2048,2048/0/default.jpg") do
-            %{status_code: 200, body: body} -> File.write!(filename, body)
-            %{body: other} -> fatal_error("Error retrieving image #{fsid}: #{other}")
-            other -> fatal_error("Error retrieving image #{fsid}: #{other}")
+            case request do
+              {:ok, %{status_code: 200, body: body}} ->
+                Logger.info("Row #{index} / #{count}")
+                File.write!(filename, body)
+
+              _ ->
+                Logger.info("Error downloading image for FSID: #{fsid}")
+            end
           end
 
           row |> List.replace_at(2, Path.relative_to(filename, base_path))
@@ -65,11 +80,6 @@ defmodule Mix.Tasks.Meadow.DcDownload do
 
       Logger.info("Export complete.")
     end
-  end
-
-  defp fatal_error(error) do
-    Logger.error(error)
-    Kernel.exit(:error)
   end
 
   defp gather_data(output_path, query, max_results) do
@@ -89,7 +99,10 @@ defmodule Mix.Tasks.Meadow.DcDownload do
 
   defp process_search_results(hits) do
     Logger.info("Processing #{length(hits)} results...")
-    Enum.flat_map(hits, &fetch_image_info/1)
+
+    hits
+    |> Enum.flat_map(&fetch_image_info/1)
+    |> Enum.reject(&is_nil/1)
   end
 
   defp fetch_image_info(%{
@@ -103,25 +116,21 @@ defmodule Mix.Tasks.Meadow.DcDownload do
       case response do
         %{status_code: 200, body: body} ->
           %{"_source" => doc} = Jason.decode!(body)
-          filename = doc |> Map.get("label") |> String.replace(".tif", ".jpg")
 
-          {{fsid, filename},
-           [
-             work_accession_number,
-             "#{work_accession_number}_FILE_#{index}",
-             filename,
-             doc["label"],
-             "am"
-           ]}
+          with filename <- doc |> Map.get("label") |> String.replace(".tif", ".jpg") do
+            {{fsid, filename},
+             [
+               work_accession_number,
+               "#{work_accession_number}_FILE_#{index}",
+               filename,
+               doc["label"],
+               "am"
+             ]}
+          end
 
-        %{status_code: 403} ->
+        _ ->
+          Logger.warn("Error retrieving info for file set #{fsid}")
           nil
-
-        %{body: other} ->
-          fatal_error("Error retrieving info for file set #{fsid}: #{other}")
-
-        other ->
-          fatal_error("Error retrieving info for file set #{fsid}: #{other}")
       end
     end)
   end
@@ -136,12 +145,27 @@ defmodule Mix.Tasks.Meadow.DcDownload do
     body =
       %{
         query: %{
-          bool: %{
-            must: [
-              %{match: query_stanza},
-              %{match: %{"model.name" => "Image"}},
-              %{match: %{visibility: "open"}}
-            ]
+          function_score: %{
+            query: %{
+              bool: %{
+                must: [
+                  %{
+                    match: query_stanza
+                  },
+                  %{
+                    match: %{
+                      "model.name" => "Image"
+                    }
+                  },
+                  %{
+                    match: %{
+                      visibility: "open"
+                    }
+                  }
+                ]
+              }
+            },
+            random_score: %{}
           }
         },
         _source: ["accession_number", "member_ids"],
@@ -157,5 +181,10 @@ defmodule Mix.Tasks.Meadow.DcDownload do
       %{body: other} -> fatal_error("Error retrieving search results: #{other}")
       other -> fatal_error("Error retrieving search results: #{other}")
     end
+  end
+
+  defp fatal_error(error) do
+    Logger.error(error)
+    Kernel.exit(:error)
   end
 end
