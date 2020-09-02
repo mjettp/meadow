@@ -153,9 +153,19 @@ defmodule Mix.Tasks.Meadow.SeedData do
   defp upload_files(csv_path, project) do
     directory = Path.rootname(csv_path, Path.extname(csv_path))
 
+    existing_files =
+      Config.upload_bucket()
+      |> ExAws.S3.list_objects()
+      |> ExAws.stream!()
+      |> Enum.to_list()
+      |> Enum.map(fn file -> Map.get(file, :key) end)
+
     with files <- Path.wildcard("#{directory}/*") do
-      Logger.info("Uploading #{length(files)} files to ingest bucket")
-      Enum.each(files, fn path -> upload_file(path, project) end)
+      file_basenames = Enum.map(files, &Path.basename/1)
+      files_to_upload = file_basenames -- existing_files
+
+      Logger.info("Uploading #{length(files_to_upload)} files to ingest bucket")
+      Enum.each(files_to_upload, fn path -> upload_file("#{directory}/#{path}", project) end)
     end
 
     csv_path
