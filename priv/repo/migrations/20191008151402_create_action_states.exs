@@ -12,5 +12,9 @@ defmodule Meadow.Repo.Migrations.CreateActionStates do
     end
 
     create(unique_index(:action_states, [:object_id, :action]))
+    create(index(:action_states, [:object_type]))
+    create(index(:action_states, [:action]))
+    create(index(:action_states, [:outcome]))
+    create(index(:action_states, [:object_type, :action, :outcome]))
   end
 end

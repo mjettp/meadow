@@ -109,6 +109,22 @@ defmodule Meadow.Data.WorksTest do
     end
   end
 
+  describe "ensure_create_work/1" do
+    test "transaction succeeds if work creation succeeds" do
+      {:ok, work} = Works.ensure_create_work(%{accession_number: "abc"})
+      assert work.accession_number == "abc"
+    end
+
+    test "transaction fails if work creation fails" do
+      {:ok, work} = Works.create_work(%{accession_number: "abc"})
+
+      assert {:error, %Ecto.Changeset{errors: errors}} =
+               Works.ensure_create_work(%{accession_number: work.accession_number})
+
+      assert {"has already been taken", _} = errors[:accession_number]
+    end
+  end
+
   describe "representative images" do
     setup do
       work = work_with_file_sets_fixture(3)
